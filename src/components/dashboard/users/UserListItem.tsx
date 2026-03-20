@@ -83,7 +83,7 @@ const UserListItem = ({
               )}
             </div>
             <p className="text-xs md:text-sm text-muted-foreground truncate">
-              {user.username} • {user.email}
+              ID: {user.id} • {user.username} • {user.email}
             </p>
             <p className="text-xs text-muted-foreground">
               Plano: {user.plan} • Carteira: R$ {user.balance.toFixed(2)} • Plano: R$ {(user.planBalance || 0).toFixed(2)}
