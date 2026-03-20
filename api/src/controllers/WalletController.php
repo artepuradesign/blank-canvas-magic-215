@@ -379,11 +379,12 @@ class WalletController {
 
             $transactionQuery = "INSERT INTO wallet_transactions
                                 (user_id, wallet_type, type, amount, balance_before, balance_after, description, payment_method, status, created_at, updated_at)
-                                VALUES (?, 'main', 'transferencia', ?, ?, ?, ?, 'saldo', 'completed', NOW(), NOW())";
+                                VALUES (?, 'main', ?, ?, ?, ?, ?, 'saldo', 'completed', NOW(), NOW())";
 
             $senderTxStmt = $this->db->prepare($transactionQuery);
             $senderTxStmt->execute([
                 $fromUserId,
+                'saida',
                 -$amount,
                 $senderBalanceBefore,
                 $senderBalanceAfter,
@@ -394,6 +395,7 @@ class WalletController {
             $recipientTxStmt = $this->db->prepare($transactionQuery);
             $recipientTxStmt->execute([
                 $recipientId,
+                'entrada',
                 $amount,
                 $recipientBalanceBefore,
                 $recipientBalanceAfter,
