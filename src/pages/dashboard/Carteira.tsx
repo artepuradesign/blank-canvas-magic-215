@@ -244,7 +244,7 @@ const Carteira = () => {
               isLoading={isLoading}
             />
             <TransferCard 
-              userBalance={balance.total}
+              userBalance={balance.saldo}
               onTransferRequest={handleTransferRequest}
               isProcessing={isProcessing}
             />
