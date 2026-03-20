@@ -67,6 +67,8 @@ switch ($method) {
     case 'POST':
         if (strpos($path, '/wallet/add-balance') !== false) {
             $walletController->addBalance();
+        } elseif (strpos($path, '/wallet/transfer') !== false) {
+            $walletController->transferToUser();
         } elseif (strpos($path, '/wallet/purchase-plan') !== false) {
             $walletController->purchasePlan();
         } else {
