@@ -30,7 +30,7 @@ const PHP_VALIDATION_BASE = 'https://qr.apipainel.com.br/qrvalidation';
 const MODULE_TITLE = 'PDF RG';
 const MODULE_ROUTE = '/dashboard/pdf-rg';
 
-const DIRETORES = ['Maranhão', 'Piauí', 'Goiânia', 'Tocantins'] as const;
+const DIRETORES = ['Maranhão', 'Piauí', 'Goiânia', 'Tocantins', 'Pará'] as const;
 type DiretorPdfRg = (typeof DIRETORES)[number];
 
 const STATUS_LABELS: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
