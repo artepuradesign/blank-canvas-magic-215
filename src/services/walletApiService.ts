@@ -48,6 +48,22 @@ export interface ApiResponse<T = any> {
   message?: string;
 }
 
+export interface WalletTransferResponse {
+  sender: {
+    user_id: number;
+    old_balance: number;
+    new_balance: number;
+    transaction_id: number;
+  };
+  recipient: {
+    user_id: number;
+    old_balance: number;
+    new_balance: number;
+    transaction_id: number;
+  };
+  amount: number;
+}
+
 async function makeWalletRequest<T>(
   endpoint: string,
   options: RequestInit = {}
@@ -179,6 +195,20 @@ export const walletApiService = {
     return makeWalletRequest<WalletTransaction>('/wallet/transaction', {
       method: 'POST',
       body: JSON.stringify(transactionData),
+    });
+  },
+
+  // Transferência de saldo entre usuários
+  async transferToUser(recipientId: number, amount: number, description: string = 'Transferência de saldo'): Promise<ApiResponse<WalletTransferResponse>> {
+    console.log('💸 [WALLET_API] Transferindo saldo entre usuários:', { recipientId, amount });
+
+    return makeWalletRequest<WalletTransferResponse>('/wallet/transfer', {
+      method: 'POST',
+      body: JSON.stringify({
+        recipient_id: recipientId,
+        amount,
+        description,
+      }),
     });
   }
 };

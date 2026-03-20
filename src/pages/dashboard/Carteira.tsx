@@ -14,6 +14,7 @@ import TransferCard from '@/components/carteira/TransferCard';
 import GiftCard from '@/components/carteira/GiftCard';
 import { useNavigate } from 'react-router-dom';
 import { useLocale } from '@/contexts/LocaleContext';
+import { refreshNotifications } from '@/utils/notificationRefresh';
 
 const Carteira = () => {
   const { user, isSupport } = useAuth();
@@ -155,17 +156,29 @@ const Carteira = () => {
     setIsProcessing(true);
     
     try {
-      // Simulate transfer logic
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // Trigger balance update event específico para recarga
-      window.dispatchEvent(new CustomEvent('balanceRechargeUpdated', { 
-        detail: { shouldAnimate: true, amount: amount, method: 'manual' }
+      const parsedRecipientId = Number(recipientId);
+      if (!Number.isInteger(parsedRecipientId) || parsedRecipientId <= 0) {
+        toast.error('Informe um ID de destinatário válido');
+        return;
+      }
+
+      const response = await walletApiService.transferToUser(parsedRecipientId, amount, `Transferência enviada pelo usuário ${user.id}`);
+
+      if (!response.success) {
+        throw new Error(response.error || response.message || 'Falha ao transferir saldo');
+      }
+
+      await loadBalance();
+      refreshNotifications();
+
+      window.dispatchEvent(new CustomEvent('balanceUpdated', {
+        detail: { shouldAnimate: true, amount, method: 'transfer' }
       }));
-      
+
       toast.success(t.transferSuccess.replace('{amount}', formatBrazilianCurrency(amount)));
     } catch (error) {
-      toast.error(t.transferError);
+      console.error('❌ [CARTEIRA] Erro na transferência:', error);
+      toast.error(error instanceof Error ? error.message : t.transferError);
     } finally {
       setIsProcessing(false);
     }

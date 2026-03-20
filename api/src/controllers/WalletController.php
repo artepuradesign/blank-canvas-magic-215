@@ -3,6 +3,7 @@
 
 require_once __DIR__ . '/../utils/Response.php';
 require_once __DIR__ . '/../middleware/AuthMiddleware.php';
+require_once __DIR__ . '/../services/NotificationService.php';
 
 class WalletController {
     private $db;
@@ -286,6 +287,195 @@ class WalletController {
             $this->db->rollback();
             error_log("ERRO PURCHASE_PLAN: " . $e->getMessage());
             Response::error('Erro ao adquirir plano: ' . $e->getMessage(), 500);
+        }
+    }
+
+    public function transferToUser() {
+        $fromUserId = AuthMiddleware::getCurrentUserId();
+        $data = json_decode(file_get_contents("php://input"), true);
+
+        $amount = isset($data['amount']) ? (float)$data['amount'] : 0;
+        $recipientId = isset($data['recipient_id']) ? (int)$data['recipient_id'] : 0;
+
+        if ($amount <= 0) {
+            Response::error('Valor da transferência deve ser maior que zero', 400);
+            return;
+        }
+
+        if ($recipientId <= 0) {
+            Response::error('ID do destinatário é obrigatório', 400);
+            return;
+        }
+
+        if ($fromUserId === $recipientId) {
+            Response::error('Não é permitido transferir para si mesmo', 400);
+            return;
+        }
+
+        try {
+            $this->db->beginTransaction();
+
+            $senderQuery = "SELECT id, full_name, saldo FROM users WHERE id = ? LIMIT 1";
+            $senderStmt = $this->db->prepare($senderQuery);
+            $senderStmt->execute([$fromUserId]);
+            $sender = $senderStmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$sender) {
+                throw new Exception('Remetente não encontrado');
+            }
+
+            $recipientQuery = "SELECT id, full_name, saldo FROM users WHERE id = ? LIMIT 1";
+            $recipientStmt = $this->db->prepare($recipientQuery);
+            $recipientStmt->execute([$recipientId]);
+            $recipient = $recipientStmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$recipient) {
+                throw new Exception('Destinatário não encontrado');
+            }
+
+            $senderBalanceBefore = (float)($sender['saldo'] ?? 0);
+            $recipientBalanceBefore = (float)($recipient['saldo'] ?? 0);
+
+            if ($senderBalanceBefore < $amount) {
+                throw new Exception('Saldo insuficiente para realizar a transferência');
+            }
+
+            $senderBalanceAfter = $senderBalanceBefore - $amount;
+            $recipientBalanceAfter = $recipientBalanceBefore + $amount;
+
+            $updateSenderQuery = "UPDATE users SET saldo = ?, saldo_atualizado = 1, updated_at = NOW() WHERE id = ?";
+            $updateSenderStmt = $this->db->prepare($updateSenderQuery);
+            $updateSenderStmt->execute([$senderBalanceAfter, $fromUserId]);
+
+            $updateRecipientQuery = "UPDATE users SET saldo = ?, saldo_atualizado = 1, updated_at = NOW() WHERE id = ?";
+            $updateRecipientStmt = $this->db->prepare($updateRecipientQuery);
+            $updateRecipientStmt->execute([$recipientBalanceAfter, $recipientId]);
+
+            $senderWalletUpsert = "INSERT INTO user_wallets (user_id, wallet_type, current_balance, available_balance, total_spent, status, created_at, updated_at, last_transaction_at)
+                                  VALUES (?, 'main', ?, ?, ?, 'active', NOW(), NOW(), NOW())
+                                  ON DUPLICATE KEY UPDATE
+                                  current_balance = VALUES(current_balance),
+                                  available_balance = VALUES(available_balance),
+                                  total_spent = total_spent + VALUES(total_spent),
+                                  updated_at = NOW(),
+                                  last_transaction_at = NOW()";
+            $senderWalletStmt = $this->db->prepare($senderWalletUpsert);
+            $senderWalletStmt->execute([$fromUserId, $senderBalanceAfter, $senderBalanceAfter, $amount]);
+
+            $recipientWalletUpsert = "INSERT INTO user_wallets (user_id, wallet_type, current_balance, available_balance, total_deposited, status, created_at, updated_at, last_transaction_at)
+                                     VALUES (?, 'main', ?, ?, ?, 'active', NOW(), NOW(), NOW())
+                                     ON DUPLICATE KEY UPDATE
+                                     current_balance = VALUES(current_balance),
+                                     available_balance = VALUES(available_balance),
+                                     total_deposited = total_deposited + VALUES(total_deposited),
+                                     updated_at = NOW(),
+                                     last_transaction_at = NOW()";
+            $recipientWalletStmt = $this->db->prepare($recipientWalletUpsert);
+            $recipientWalletStmt->execute([$recipientId, $recipientBalanceAfter, $recipientBalanceAfter, $amount]);
+
+            $description = trim($data['description'] ?? '') ?: 'Transferência de saldo entre usuários';
+            $senderTxDescription = $description . " | Enviado para {$recipient['full_name']} (ID {$recipientId})";
+            $recipientTxDescription = $description . " | Recebido de {$sender['full_name']} (ID {$fromUserId})";
+
+            $transactionQuery = "INSERT INTO wallet_transactions
+                                (user_id, wallet_type, type, amount, balance_before, balance_after, description, payment_method, status, created_at, updated_at)
+                                VALUES (?, 'main', 'transferencia', ?, ?, ?, ?, 'saldo', 'completed', NOW(), NOW())";
+
+            $senderTxStmt = $this->db->prepare($transactionQuery);
+            $senderTxStmt->execute([
+                $fromUserId,
+                -$amount,
+                $senderBalanceBefore,
+                $senderBalanceAfter,
+                $senderTxDescription
+            ]);
+            $senderTransactionId = (int)$this->db->lastInsertId();
+
+            $recipientTxStmt = $this->db->prepare($transactionQuery);
+            $recipientTxStmt->execute([
+                $recipientId,
+                $amount,
+                $recipientBalanceBefore,
+                $recipientBalanceAfter,
+                $recipientTxDescription
+            ]);
+            $recipientTransactionId = (int)$this->db->lastInsertId();
+
+            $notificationService = new NotificationService($this->db);
+            $formattedAmount = 'R$ ' . number_format($amount, 2, ',', '.');
+
+            $notificationService->createNotification(
+                $fromUserId,
+                'wallet_transfer_sent',
+                'Transferência enviada',
+                "Você transferiu {$formattedAmount} para {$recipient['full_name']} (ID {$recipientId}).",
+                '/dashboard/carteira',
+                'Ver carteira',
+                'medium'
+            );
+
+            $notificationService->createNotification(
+                $recipientId,
+                'wallet_transfer_received',
+                'Transferência recebida',
+                "Você recebeu {$formattedAmount} de {$sender['full_name']} (ID {$fromUserId}).",
+                '/dashboard/carteira',
+                'Ver carteira',
+                'high'
+            );
+
+            $this->logUserAction(
+                $fromUserId,
+                'wallet_transfer_sent',
+                'wallet',
+                "Transferiu {$formattedAmount} para usuário {$recipientId}",
+                [
+                    'recipient_id' => $recipientId,
+                    'amount' => $amount,
+                    'old_balance' => $senderBalanceBefore,
+                    'new_balance' => $senderBalanceAfter,
+                    'transaction_id' => $senderTransactionId
+                ]
+            );
+
+            $this->logUserAction(
+                $recipientId,
+                'wallet_transfer_received',
+                'wallet',
+                "Recebeu {$formattedAmount} do usuário {$fromUserId}",
+                [
+                    'sender_id' => $fromUserId,
+                    'amount' => $amount,
+                    'old_balance' => $recipientBalanceBefore,
+                    'new_balance' => $recipientBalanceAfter,
+                    'transaction_id' => $recipientTransactionId
+                ]
+            );
+
+            $this->db->commit();
+
+            Response::success([
+                'sender' => [
+                    'user_id' => $fromUserId,
+                    'old_balance' => $senderBalanceBefore,
+                    'new_balance' => $senderBalanceAfter,
+                    'transaction_id' => $senderTransactionId
+                ],
+                'recipient' => [
+                    'user_id' => $recipientId,
+                    'old_balance' => $recipientBalanceBefore,
+                    'new_balance' => $recipientBalanceAfter,
+                    'transaction_id' => $recipientTransactionId
+                ],
+                'amount' => $amount
+            ], 'Transferência realizada com sucesso');
+        } catch (Exception $e) {
+            $this->db->rollback();
+            error_log('ERRO TRANSFER_TO_USER: ' . $e->getMessage());
+
+            $message = $e->getMessage();
+            $statusCode = str_contains(strtolower($message), 'saldo insuficiente') ? 400 : 500;
+            Response::error('Erro ao transferir saldo: ' . $message, $statusCode);
         }
     }
     
