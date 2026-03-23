@@ -135,9 +135,20 @@ const CnpjProdutos = () => {
 
         toast.success('Produto atualizado com sucesso');
       } else {
-        const result = await cnpjProdutosService.criar({
+        const createPayload = {
           module_id: MODULE_ID,
-          ...parsed.data,
+          cnpj: parsed.data.cnpj,
+          nome_empresa: parsed.data.nome_empresa,
+          nome_produto: parsed.data.nome_produto,
+          sku: parsed.data.sku,
+          categoria: parsed.data.categoria,
+          preco: parsed.data.preco,
+          estoque: parsed.data.estoque,
+          status: parsed.data.status,
+        };
+
+        const result = await cnpjProdutosService.criar({
+          ...createPayload,
         });
 
         if (!result.success) {
