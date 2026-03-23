@@ -1,0 +1,269 @@
+<?php
+// src/controllers/CnpjProdutosController.php
+
+require_once __DIR__ . '/../utils/Response.php';
+require_once __DIR__ . '/../middleware/AuthMiddleware.php';
+require_once __DIR__ . '/../models/CnpjProdutos.php';
+
+class CnpjProdutosController {
+    private $db;
+    private $model;
+
+    public function __construct($db) {
+        $this->db = $db;
+        $this->model = new CnpjProdutos($db);
+    }
+
+    public function listProdutos() {
+        try {
+            $userId = (int)(AuthMiddleware::getCurrentUserId() ?? 0);
+            if ($userId <= 0) {
+                Response::error('Usuário não autenticado', 401);
+                return;
+            }
+
+            $isAdmin = $this->isAdminOrSupport($userId);
+            $limit = isset($_GET['limit']) ? max(1, min(100, (int)$_GET['limit'])) : 50;
+            $offset = isset($_GET['offset']) ? max(0, (int)$_GET['offset']) : 0;
+
+            $search = isset($_GET['search']) ? trim((string)$_GET['search']) : null;
+            $status = isset($_GET['status']) ? trim((string)$_GET['status']) : null;
+            $cnpj = isset($_GET['cnpj']) ? trim((string)$_GET['cnpj']) : null;
+
+            if ($status && !in_array($status, ['ativo', 'inativo', 'rascunho'], true)) {
+                Response::error('Status inválido', 400);
+                return;
+            }
+
+            $rows = $this->model->listProdutos($userId, $isAdmin, $limit, $offset, $search, $status, $cnpj);
+            $total = $this->model->countProdutos($userId, $isAdmin, $search, $status, $cnpj);
+
+            Response::success([
+                'data' => $rows,
+                'pagination' => [
+                    'total' => $total,
+                    'limit' => $limit,
+                    'offset' => $offset,
+                ],
+            ], 'Produtos carregados com sucesso');
+        } catch (Exception $e) {
+            Response::error('Erro ao listar produtos: ' . $e->getMessage(), 500);
+        }
+    }
+
+    public function criar() {
+        try {
+            $userId = (int)(AuthMiddleware::getCurrentUserId() ?? 0);
+            if ($userId <= 0) {
+                Response::error('Usuário não autenticado', 401);
+                return;
+            }
+
+            $input = $this->readJsonInput();
+            if (!$input) {
+                Response::error('Dados inválidos', 400);
+                return;
+            }
+
+            $payload = $this->validatePayload($input, false);
+            $newId = $this->model->createProduto($payload, $userId);
+            $created = $this->model->findByIdForUser($newId, $userId, true);
+
+            Response::success($created, 'Produto cadastrado com sucesso', 201);
+        } catch (InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 400);
+        } catch (Exception $e) {
+            Response::error('Erro ao cadastrar produto: ' . $e->getMessage(), 500);
+        }
+    }
+
+    public function atualizar() {
+        try {
+            $userId = (int)(AuthMiddleware::getCurrentUserId() ?? 0);
+            if ($userId <= 0) {
+                Response::error('Usuário não autenticado', 401);
+                return;
+            }
+
+            $isAdmin = $this->isAdminOrSupport($userId);
+            $input = $this->readJsonInput();
+            if (!$input || !isset($input['id'])) {
+                Response::error('id é obrigatório', 400);
+                return;
+            }
+
+            $id = (int)$input['id'];
+            if ($id <= 0) {
+                Response::error('id inválido', 400);
+                return;
+            }
+
+            $existing = $this->model->findByIdForUser($id, $userId, $isAdmin);
+            if (!$existing) {
+                Response::error('Produto não encontrado ou sem permissão', 404);
+                return;
+            }
+
+            $payload = $this->validatePayload($input, true);
+            if (empty($payload)) {
+                Response::error('Nenhum campo válido para atualizar', 400);
+                return;
+            }
+
+            $this->model->updateProduto($id, $payload);
+            $updated = $this->model->findByIdForUser($id, $userId, $isAdmin);
+
+            Response::success($updated, 'Produto atualizado com sucesso');
+        } catch (InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 400);
+        } catch (Exception $e) {
+            Response::error('Erro ao atualizar produto: ' . $e->getMessage(), 500);
+        }
+    }
+
+    public function excluir() {
+        try {
+            $userId = (int)(AuthMiddleware::getCurrentUserId() ?? 0);
+            if ($userId <= 0) {
+                Response::error('Usuário não autenticado', 401);
+                return;
+            }
+
+            $isAdmin = $this->isAdminOrSupport($userId);
+            $input = $this->readJsonInput();
+            if (!$input || !isset($input['id'])) {
+                Response::error('id é obrigatório', 400);
+                return;
+            }
+
+            $id = (int)$input['id'];
+            if ($id <= 0) {
+                Response::error('id inválido', 400);
+                return;
+            }
+
+            $existing = $this->model->findByIdForUser($id, $userId, $isAdmin);
+            if (!$existing) {
+                Response::error('Produto não encontrado ou sem permissão', 404);
+                return;
+            }
+
+            $this->model->deleteProduto($id);
+            Response::success(['id' => $id], 'Produto excluído com sucesso');
+        } catch (Exception $e) {
+            Response::error('Erro ao excluir produto: ' . $e->getMessage(), 500);
+        }
+    }
+
+    private function readJsonInput(): ?array {
+        $raw = file_get_contents('php://input');
+        if (!$raw) {
+            return null;
+        }
+
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    private function validatePayload(array $input, bool $partial = false): array {
+        $result = [];
+
+        $requiredFields = ['cnpj', 'nome_empresa', 'nome_produto'];
+        if (!$partial) {
+            foreach ($requiredFields as $field) {
+                if (!isset($input[$field]) || trim((string)$input[$field]) === '') {
+                    throw new InvalidArgumentException("{$field} é obrigatório");
+                }
+            }
+        }
+
+        if (array_key_exists('cnpj', $input)) {
+            $digits = preg_replace('/\D+/', '', (string)$input['cnpj']);
+            if (strlen($digits) !== 14) {
+                throw new InvalidArgumentException('CNPJ deve conter 14 dígitos');
+            }
+            $result['cnpj'] = $this->formatCnpj($digits);
+        }
+
+        if (array_key_exists('nome_empresa', $input)) {
+            $nomeEmpresa = trim((string)$input['nome_empresa']);
+            if ($nomeEmpresa === '' || mb_strlen($nomeEmpresa) > 255) {
+                throw new InvalidArgumentException('nome_empresa inválido');
+            }
+            $result['nome_empresa'] = $nomeEmpresa;
+        }
+
+        if (array_key_exists('nome_produto', $input)) {
+            $nomeProduto = trim((string)$input['nome_produto']);
+            if ($nomeProduto === '' || mb_strlen($nomeProduto) > 255) {
+                throw new InvalidArgumentException('nome_produto inválido');
+            }
+            $result['nome_produto'] = $nomeProduto;
+        }
+
+        if (array_key_exists('sku', $input)) {
+            $sku = trim((string)$input['sku']);
+            $result['sku'] = $sku === '' ? null : mb_substr($sku, 0, 120);
+        }
+
+        if (array_key_exists('categoria', $input)) {
+            $categoria = trim((string)$input['categoria']);
+            $result['categoria'] = $categoria === '' ? null : mb_substr($categoria, 0, 120);
+        }
+
+        if (array_key_exists('preco', $input)) {
+            $preco = (float)$input['preco'];
+            if ($preco < 0) {
+                throw new InvalidArgumentException('preco não pode ser negativo');
+            }
+            $result['preco'] = round($preco, 2);
+        } elseif (!$partial) {
+            $result['preco'] = 0;
+        }
+
+        if (array_key_exists('estoque', $input)) {
+            $estoque = (int)$input['estoque'];
+            if ($estoque < 0) {
+                throw new InvalidArgumentException('estoque não pode ser negativo');
+            }
+            $result['estoque'] = $estoque;
+        } elseif (!$partial) {
+            $result['estoque'] = 0;
+        }
+
+        if (array_key_exists('status', $input)) {
+            $status = trim((string)$input['status']);
+            if (!in_array($status, ['ativo', 'inativo', 'rascunho'], true)) {
+                throw new InvalidArgumentException('status inválido');
+            }
+            $result['status'] = $status;
+        } elseif (!$partial) {
+            $result['status'] = 'ativo';
+        }
+
+        if (array_key_exists('module_id', $input)) {
+            $result['module_id'] = (int)$input['module_id'] > 0 ? (int)$input['module_id'] : 183;
+        } elseif (!$partial) {
+            $result['module_id'] = 183;
+        }
+
+        return $result;
+    }
+
+    private function isAdminOrSupport(int $userId): bool {
+        $stmt = $this->db->prepare('SELECT user_role FROM users WHERE id = ? LIMIT 1');
+        $stmt->execute([$userId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $role = $row['user_role'] ?? '';
+
+        return in_array($role, ['admin', 'suporte'], true);
+    }
+
+    private function formatCnpj(string $digits): string {
+        return substr($digits, 0, 2) . '.' .
+            substr($digits, 2, 3) . '.' .
+            substr($digits, 5, 3) . '/' .
+            substr($digits, 8, 4) . '-' .
+            substr($digits, 12, 2);
+    }
+}
