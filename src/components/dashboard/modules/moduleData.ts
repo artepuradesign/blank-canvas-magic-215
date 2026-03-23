@@ -16,7 +16,8 @@ import {
   FileText,
   Calendar,
   Globe,
-  Server
+  Server,
+  Package
 } from 'lucide-react';
 
 export const serviceModules = [
@@ -144,6 +145,13 @@ export const serviceModules = [
     description: "Hospedagem VPS com Linux por 6 meses",
     icon: Server,
     path: "/dashboard/sistemas-hospedagem-vps-6",
+    price: "2,00"
+  },
+  {
+    title: "CNPJ PRODUTOS",
+    description: "Administração completa de produtos por CNPJ",
+    icon: Package,
+    path: "/dashboard/cnpj-produtos",
     price: "2,00"
   }
 ];

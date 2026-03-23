@@ -607,6 +607,12 @@ try {
         exit();
     }
 
+    // CNPJ Produtos - Módulo 183
+    if (strpos($endpoint, '/cnpj-produtos') === 0) {
+        include __DIR__ . '/src/routes/cnpj_produtos.php';
+        exit();
+    }
+
     // Sistemas Domínio .COM - Módulo 176
     if (strpos($endpoint, '/sistemas-dominio-com') === 0) {
         include __DIR__ . '/src/routes/sistemas_dominio_com.php';
@@ -786,7 +792,8 @@ try {
                 'login-hotmail' => '/login-hotmail',
                 'login-gmail' => '/login-gmail',
                 'login-renner' => '/login-renner',
-                'pdf-rg' => '/pdf-rg'
+                'pdf-rg' => '/pdf-rg',
+                'cnpj-produtos' => '/cnpj-produtos'
             ]
         ], 'API Externa operacional');
         exit();
