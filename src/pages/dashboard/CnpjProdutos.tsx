@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
-import { Package, Plus, RefreshCw, Pencil, Trash2, Search } from 'lucide-react';
+import { Package, Plus, RefreshCw, Pencil, Trash2, Search, X } from 'lucide-react';
 import DashboardTitleCard from '@/components/dashboard/DashboardTitleCard';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,12 +16,63 @@ import { cnpjProdutosService, type CnpjProduto, type ProdutoStatus } from '@/ser
 
 const MODULE_ID = 183;
 
+const PRODUCT_CATEGORIES = [
+  'Alimentos e Bebidas',
+  'Alimentos Naturais',
+  'Artigos para Festas',
+  'Artesanato',
+  'Automotivo',
+  'Bebidas',
+  'Beleza e Cosméticos',
+  'Brinquedos',
+  'Calçados',
+  'Casa e Decoração',
+  'Celulares e Acessórios',
+  'Climatização',
+  'Construção',
+  'Cozinha e Utilidades',
+  'Eletrodomésticos',
+  'Eletrônicos',
+  'Embalagens',
+  'Escritório',
+  'Esportes',
+  'Ferramentas',
+  'Floricultura',
+  'Games',
+  'Higiene e Limpeza',
+  'Informática',
+  'Instrumentos Musicais',
+  'Joias e Acessórios',
+  'Livros e Papelaria',
+  'Malas e Mochilas',
+  'Materiais Elétricos',
+  'Materiais Hidráulicos',
+  'Móveis',
+  'Moda Feminina',
+  'Moda Infantil',
+  'Moda Masculina',
+  'Ótica',
+  'Papelaria',
+  'Perfumaria',
+  'Pet Shop',
+  'Produtos Digitais',
+  'Saúde',
+  'Saúde e Bem-estar',
+  'Segurança',
+  'Serviços',
+  'Suplementos',
+  'Telefonia',
+  'Turismo',
+  'Vestuário',
+] as const;
+
 const produtoSchema = z.object({
   cnpj: z.string().min(14, 'CNPJ deve conter 14 dígitos').max(18, 'CNPJ inválido'),
   nome_empresa: z.string().trim().min(2, 'Informe a empresa').max(255, 'Máximo de 255 caracteres'),
   nome_produto: z.string().trim().min(2, 'Informe o produto').max(255, 'Máximo de 255 caracteres'),
   sku: z.string().trim().max(120, 'Máximo de 120 caracteres').optional().or(z.literal('')),
   categoria: z.string().trim().max(120, 'Máximo de 120 caracteres').optional().or(z.literal('')),
+  fotos: z.array(z.string().url('URL de foto inválida')).max(5, 'Máximo de 5 fotos'),
   preco: z.number().min(0, 'Preço não pode ser negativo'),
   estoque: z.number().int().min(0, 'Estoque não pode ser negativo'),
   status: z.enum(['ativo', 'inativo', 'rascunho']),
@@ -35,6 +86,7 @@ const emptyForm: ProdutoFormData = {
   nome_produto: '',
   sku: '',
   categoria: '',
+  fotos: [],
   preco: 0,
   estoque: 0,
   status: 'ativo',
@@ -47,7 +99,7 @@ const statusLabel: Record<ProdutoStatus, string> = {
 };
 
 const CnpjProdutos = () => {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const isAdmin = profile?.user_role === 'admin' || profile?.user_role === 'suporte';
 
   const [produtos, setProdutos] = useState<CnpjProduto[]>([]);
@@ -56,6 +108,8 @@ const CnpjProdutos = () => {
   const [statusFilter, setStatusFilter] = useState<'todos' | ProdutoStatus>('todos');
 
   const [formData, setFormData] = useState<ProdutoFormData>(emptyForm);
+  const [productPhotos, setProductPhotos] = useState<string[]>([]);
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const [editing, setEditing] = useState<CnpjProduto | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -70,6 +124,11 @@ const CnpjProdutos = () => {
       .replace(/\.(\d{3})(\d)/, '.$1/$2')
       .replace(/(\d{4})(\d)/, '$1-$2');
   };
+
+  const userCnpj = formatCnpj(user?.cnpj || '');
+  const userEmpresa = (user?.full_name || '').trim();
+
+  const canUseUserCompanyData = userCnpj.replace(/\D/g, '').length === 14 && userEmpresa.length > 1;
 
   const loadProdutos = useCallback(async () => {
     setLoading(true);
@@ -109,12 +168,69 @@ const CnpjProdutos = () => {
   }, [produtos]);
 
   const resetForm = () => {
-    setFormData(emptyForm);
+    setFormData({
+      ...emptyForm,
+      cnpj: userCnpj,
+      nome_empresa: userEmpresa,
+      fotos: [],
+    });
+    setProductPhotos([]);
     setEditing(null);
   };
 
+  useEffect(() => {
+    if (editing) return;
+    setFormData((prev) => ({
+      ...prev,
+      cnpj: userCnpj,
+      nome_empresa: userEmpresa,
+    }));
+  }, [editing, userCnpj, userEmpresa]);
+
+  const handleUploadPhotos = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    const incoming = Array.from(files);
+    if (productPhotos.length + incoming.length > 5) {
+      toast.error('Você pode adicionar no máximo 5 fotos por produto');
+      return;
+    }
+
+    setUploadingPhotos(true);
+    try {
+      const uploadedUrls: string[] = [];
+
+      for (const file of incoming) {
+        const result = await cnpjProdutosService.uploadFoto(file);
+        if (!result.success || !result.data?.url) {
+          throw new Error(result.error || 'Falha ao enviar foto');
+        }
+        uploadedUrls.push(result.data.url);
+      }
+
+      setProductPhotos((prev) => [...prev, ...uploadedUrls]);
+      toast.success('Fotos enviadas com sucesso');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erro ao enviar fotos');
+    } finally {
+      setUploadingPhotos(false);
+    }
+  };
+
   const handleSave = async () => {
-    const parsed = produtoSchema.safeParse(formData);
+    if (!canUseUserCompanyData) {
+      toast.error('Complete CNPJ e nome no menu Dados Pessoais antes de cadastrar produtos');
+      return;
+    }
+
+    const payload = {
+      ...formData,
+      cnpj: userCnpj,
+      nome_empresa: userEmpresa,
+      fotos: productPhotos,
+    };
+
+    const parsed = produtoSchema.safeParse(payload);
     if (!parsed.success) {
       toast.error(parsed.error.issues[0]?.message || 'Dados inválidos');
       return;
@@ -142,6 +258,7 @@ const CnpjProdutos = () => {
           nome_produto: parsed.data.nome_produto,
           sku: parsed.data.sku,
           categoria: parsed.data.categoria,
+          fotos: parsed.data.fotos,
           preco: parsed.data.preco,
           estoque: parsed.data.estoque,
           status: parsed.data.status,
@@ -174,10 +291,12 @@ const CnpjProdutos = () => {
       nome_produto: produto.nome_produto,
       sku: produto.sku || '',
       categoria: produto.categoria || '',
+      fotos: produto.fotos || [],
       preco: Number(produto.preco || 0),
       estoque: Number(produto.estoque || 0),
       status: produto.status,
     });
+    setProductPhotos(produto.fotos || []);
   };
 
   const handleDelete = async () => {
@@ -225,13 +344,19 @@ const CnpjProdutos = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="cnpj">CNPJ *</Label>
-                <Input id="cnpj" value={formData.cnpj} onChange={(e) => setFormData((prev) => ({ ...prev, cnpj: formatCnpj(e.target.value) }))} placeholder="00.000.000/0000-00" />
+                <Input id="cnpj" value={formData.cnpj} readOnly disabled placeholder="00.000.000/0000-00" />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="empresa">Empresa *</Label>
-                <Input id="empresa" value={formData.nome_empresa} onChange={(e) => setFormData((prev) => ({ ...prev, nome_empresa: e.target.value }))} placeholder="Nome da empresa" />
+                <Input id="empresa" value={formData.nome_empresa} readOnly disabled placeholder="Nome da empresa" />
               </div>
             </div>
+
+            {!canUseUserCompanyData && (
+              <p className="text-sm text-destructive">
+                Preencha CNPJ e nome da empresa em Dados Pessoais para liberar o cadastro de produtos.
+              </p>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -247,7 +372,18 @@ const CnpjProdutos = () => {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <div className="space-y-1.5 md:col-span-2">
                 <Label htmlFor="categoria">Categoria</Label>
-                <Input id="categoria" value={formData.categoria || ''} onChange={(e) => setFormData((prev) => ({ ...prev, categoria: e.target.value }))} placeholder="Categoria" />
+                <Select value={formData.categoria || ''} onValueChange={(value) => setFormData((prev) => ({ ...prev, categoria: value }))}>
+                  <SelectTrigger id="categoria">
+                    <SelectValue placeholder="Selecione uma categoria" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PRODUCT_CATEGORIES.map((category) => (
+                      <SelectItem key={category} value={category}>
+                        {category}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="preco">Preço (R$)</Label>
@@ -257,6 +393,48 @@ const CnpjProdutos = () => {
                 <Label htmlFor="estoque">Estoque</Label>
                 <Input id="estoque" type="number" min={0} value={formData.estoque} onChange={(e) => setFormData((prev) => ({ ...prev, estoque: Number(e.target.value) }))} />
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="fotos">Fotos do produto (até 5)</Label>
+                <span className="text-xs text-muted-foreground">{productPhotos.length}/5</span>
+              </div>
+              <Input
+                id="fotos"
+                type="file"
+                accept="image/*"
+                multiple
+                disabled={uploadingPhotos || productPhotos.length >= 5}
+                onChange={(e) => {
+                  handleUploadPhotos(e.target.files);
+                  e.currentTarget.value = '';
+                }}
+              />
+              {uploadingPhotos && <p className="text-xs text-muted-foreground">Enviando fotos...</p>}
+              {productPhotos.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                  {productPhotos.map((photoUrl, index) => (
+                    <div key={`${photoUrl}-${index}`} className="relative rounded-md border p-1">
+                      <img
+                        src={photoUrl}
+                        alt={`Foto do produto ${index + 1}`}
+                        loading="lazy"
+                        className="w-full h-20 object-cover rounded"
+                      />
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="secondary"
+                        className="absolute top-1 right-1 h-6 w-6"
+                        onClick={() => setProductPhotos((prev) => prev.filter((_, i) => i !== index))}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
