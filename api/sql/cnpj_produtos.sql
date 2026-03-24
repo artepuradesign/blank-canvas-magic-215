@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS cnpj_produtos (
   nome_produto VARCHAR(255) NOT NULL,
   sku VARCHAR(120) NULL,
   categoria VARCHAR(120) NULL,
+  fotos_json JSON NULL,
 
   preco DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   estoque INT NOT NULL DEFAULT 0,

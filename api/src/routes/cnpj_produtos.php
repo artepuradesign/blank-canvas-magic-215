@@ -28,7 +28,9 @@ switch ($method) {
         break;
 
     case 'POST':
-        if (strpos($path, '/cnpj-produtos/criar') !== false) {
+        if (strpos($path, '/cnpj-produtos/upload-foto') !== false) {
+            $controller->uploadFoto();
+        } elseif (strpos($path, '/cnpj-produtos/criar') !== false) {
             $controller->criar();
         } else {
             Response::notFound('Endpoint não encontrado');
