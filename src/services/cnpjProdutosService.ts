@@ -12,6 +12,8 @@ export interface CnpjProduto {
   nome_produto: string;
   sku: string | null;
   categoria: string | null;
+  codigo_barras?: string | null;
+  controlar_estoque?: boolean | number;
   fotos?: string[];
   preco: number;
   estoque: number;
@@ -79,6 +81,8 @@ export const cnpjProdutosService = {
     nome_produto: string;
     sku?: string;
     categoria?: string;
+    codigo_barras?: string;
+    controlar_estoque?: boolean;
     fotos?: string[];
     preco: number;
     estoque: number;
@@ -97,6 +101,8 @@ export const cnpjProdutosService = {
     nome_produto?: string;
     sku?: string;
     categoria?: string;
+    codigo_barras?: string;
+    controlar_estoque?: boolean;
     fotos?: string[];
     preco?: number;
     estoque?: number;

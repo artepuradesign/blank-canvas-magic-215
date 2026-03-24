@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
-import { Package, Plus, RefreshCw, Pencil, Trash2, Search, X } from 'lucide-react';
+import { Package, Plus, RefreshCw, Pencil, Trash2, Search, X, ScanLine } from 'lucide-react';
 import DashboardTitleCard from '@/components/dashboard/DashboardTitleCard';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -8,8 +8,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import BarcodeScanner from '@/components/cnpj-produtos/BarcodeScanner';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { cnpjProdutosService, type CnpjProduto, type ProdutoStatus } from '@/services/cnpjProdutosService';
@@ -72,6 +74,8 @@ const produtoSchema = z.object({
   nome_produto: z.string().trim().min(2, 'Informe o produto').max(255, 'Máximo de 255 caracteres'),
   sku: z.string().trim().max(120, 'Máximo de 120 caracteres').optional().or(z.literal('')),
   categoria: z.string().trim().max(120, 'Máximo de 120 caracteres').optional().or(z.literal('')),
+  codigo_barras: z.string().trim().max(64, 'Máximo de 64 caracteres').optional().or(z.literal('')),
+  controlar_estoque: z.boolean(),
   fotos: z.array(z.string().url('URL de foto inválida')).max(5, 'Máximo de 5 fotos'),
   preco: z.number().min(0, 'Preço não pode ser negativo'),
   estoque: z.number().int().min(0, 'Estoque não pode ser negativo'),
@@ -86,6 +90,8 @@ const emptyForm: ProdutoFormData = {
   nome_produto: '',
   sku: '',
   categoria: '',
+  codigo_barras: '',
+  controlar_estoque: false,
   fotos: [],
   preco: 0,
   estoque: 0,
@@ -110,6 +116,7 @@ const CnpjProdutos = () => {
   const [formData, setFormData] = useState<ProdutoFormData>(emptyForm);
   const [productPhotos, setProductPhotos] = useState<string[]>([]);
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
   const [editing, setEditing] = useState<CnpjProduto | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -162,7 +169,7 @@ const CnpjProdutos = () => {
     const total = produtos.length;
     const ativos = produtos.filter((p) => p.status === 'ativo').length;
     const rascunho = produtos.filter((p) => p.status === 'rascunho').length;
-    const baixoEstoque = produtos.filter((p) => p.estoque <= 5).length;
+    const baixoEstoque = produtos.filter((p) => (p.controlar_estoque === true || p.controlar_estoque === 1) && p.estoque <= 5).length;
 
     return { total, ativos, rascunho, baixoEstoque };
   }, [produtos]);
@@ -227,6 +234,7 @@ const CnpjProdutos = () => {
       ...formData,
       cnpj: userCnpj,
       nome_empresa: userEmpresa,
+      estoque: formData.controlar_estoque ? formData.estoque : 0,
       fotos: productPhotos,
     };
 
@@ -258,6 +266,8 @@ const CnpjProdutos = () => {
           nome_produto: parsed.data.nome_produto,
           sku: parsed.data.sku,
           categoria: parsed.data.categoria,
+          codigo_barras: parsed.data.codigo_barras,
+          controlar_estoque: parsed.data.controlar_estoque,
           fotos: parsed.data.fotos,
           preco: parsed.data.preco,
           estoque: parsed.data.estoque,
@@ -291,6 +301,8 @@ const CnpjProdutos = () => {
       nome_produto: produto.nome_produto,
       sku: produto.sku || '',
       categoria: produto.categoria || '',
+      codigo_barras: produto.codigo_barras || '',
+      controlar_estoque: produto.controlar_estoque === true || produto.controlar_estoque === 1,
       fotos: produto.fotos || [],
       preco: Number(produto.preco || 0),
       estoque: Number(produto.estoque || 0),
@@ -369,8 +381,26 @@ const CnpjProdutos = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <div className="space-y-1.5 md:col-span-2">
+            <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="codigo_barras">Código de barras</Label>
+                <Input
+                  id="codigo_barras"
+                  value={formData.codigo_barras || ''}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, codigo_barras: e.target.value.replace(/\s+/g, '') }))}
+                  placeholder="Ex: 7891234567890"
+                />
+              </div>
+              <div className="flex items-end">
+                <Button type="button" variant="outline" className="w-full md:w-auto" onClick={() => setScannerOpen(true)}>
+                  <ScanLine className="h-4 w-4" />
+                  Escanear
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="space-y-1.5">
                 <Label htmlFor="categoria">Categoria</Label>
                 <Select value={formData.categoria || ''} onValueChange={(value) => setFormData((prev) => ({ ...prev, categoria: value }))}>
                   <SelectTrigger id="categoria">
@@ -389,10 +419,28 @@ const CnpjProdutos = () => {
                 <Label htmlFor="preco">Preço (R$)</Label>
                 <Input id="preco" type="number" step="0.01" min={0} value={formData.preco} onChange={(e) => setFormData((prev) => ({ ...prev, preco: Number(e.target.value) }))} />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="estoque">Estoque</Label>
-                <Input id="estoque" type="number" min={0} value={formData.estoque} onChange={(e) => setFormData((prev) => ({ ...prev, estoque: Number(e.target.value) }))} />
+            </div>
+
+            <div className="rounded-md border p-3 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium">Controlar estoque</p>
+                  <p className="text-xs text-muted-foreground">Habilite para informar a quantidade disponível.</p>
+                </div>
+                <Switch
+                  checked={formData.controlar_estoque}
+                  onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, controlar_estoque: checked, estoque: checked ? prev.estoque : 0 }))}
+                />
               </div>
+
+              {formData.controlar_estoque ? (
+                <div className="space-y-1.5 max-w-[220px]">
+                  <Label htmlFor="estoque">Quantidade em estoque</Label>
+                  <Input id="estoque" type="number" min={0} value={formData.estoque} onChange={(e) => setFormData((prev) => ({ ...prev, estoque: Number(e.target.value) }))} />
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">Estoque desativado para este produto.</p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -503,7 +551,7 @@ const CnpjProdutos = () => {
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Buscar por produto, empresa ou SKU"
+                   placeholder="Buscar por produto, empresa, SKU ou código"
                   className="pl-8 w-full sm:w-[280px]"
                 />
               </div>
@@ -566,10 +614,11 @@ const CnpjProdutos = () => {
                       <div className="flex flex-col">
                         <span className="text-sm font-medium">{produto.nome_produto}</span>
                         <span className="text-xs text-muted-foreground">{produto.sku || 'Sem SKU'}</span>
+                        <span className="text-xs text-muted-foreground">{produto.codigo_barras || 'Sem código de barras'}</span>
                       </div>
                     </TableCell>
                     <TableCell>R$ {Number(produto.preco).toFixed(2).replace('.', ',')}</TableCell>
-                    <TableCell>{produto.estoque}</TableCell>
+                    <TableCell>{produto.controlar_estoque === true || produto.controlar_estoque === 1 ? produto.estoque : '—'}</TableCell>
                     <TableCell>
                       <Badge variant={produto.status === 'ativo' ? 'default' : 'secondary'}>{statusLabel[produto.status]}</Badge>
                     </TableCell>
@@ -611,6 +660,23 @@ const CnpjProdutos = () => {
               {deleting ? 'Excluindo...' : 'Confirmar exclusão'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={scannerOpen} onOpenChange={setScannerOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Ler código de barras</DialogTitle>
+            <DialogDescription>Use a câmera do celular para escanear e preencher automaticamente o campo.</DialogDescription>
+          </DialogHeader>
+
+          <BarcodeScanner
+            onDetected={(value) => {
+              setFormData((prev) => ({ ...prev, codigo_barras: value }));
+              setScannerOpen(false);
+              toast.success('Código de barras capturado');
+            }}
+          />
         </DialogContent>
       </Dialog>
     </div>

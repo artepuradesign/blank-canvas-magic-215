@@ -287,6 +287,31 @@ class CnpjProdutosController {
             $result['categoria'] = $categoria === '' ? null : mb_substr($categoria, 0, 120);
         }
 
+        $controlarEstoque = null;
+        if (array_key_exists('controlar_estoque', $input)) {
+            $rawControlar = $input['controlar_estoque'];
+            $isTrue = $rawControlar === true || $rawControlar === 1 || $rawControlar === '1' || $rawControlar === 'true';
+            $isFalse = $rawControlar === false || $rawControlar === 0 || $rawControlar === '0' || $rawControlar === 'false';
+
+            if (!$isTrue && !$isFalse) {
+                throw new InvalidArgumentException('controlar_estoque inválido');
+            }
+
+            $controlarEstoque = $isTrue;
+            $result['controlar_estoque'] = $controlarEstoque ? 1 : 0;
+        } elseif (!$partial) {
+            $controlarEstoque = false;
+            $result['controlar_estoque'] = 0;
+        }
+
+        if (array_key_exists('codigo_barras', $input)) {
+            $codigoBarras = preg_replace('/\s+/', '', trim((string)$input['codigo_barras']));
+            if ($codigoBarras !== '' && mb_strlen($codigoBarras) > 64) {
+                throw new InvalidArgumentException('codigo_barras deve ter no máximo 64 caracteres');
+            }
+            $result['codigo_barras'] = $codigoBarras === '' ? null : $codigoBarras;
+        }
+
         if (array_key_exists('fotos', $input)) {
             if (!is_array($input['fotos'])) {
                 throw new InvalidArgumentException('fotos deve ser uma lista');
@@ -321,6 +346,10 @@ class CnpjProdutosController {
             }
             $result['estoque'] = $estoque;
         } elseif (!$partial) {
+            $result['estoque'] = 0;
+        }
+
+        if ($controlarEstoque === false) {
             $result['estoque'] = 0;
         }
 
@@ -361,6 +390,9 @@ class CnpjProdutosController {
     }
 
     private function normalizeProdutoRow(array $row): array {
+        $row['codigo_barras'] = !empty($row['codigo_barras']) ? (string)$row['codigo_barras'] : null;
+        $row['controlar_estoque'] = ((int)($row['controlar_estoque'] ?? 0)) === 1;
+
         $fotos = [];
         if (!empty($row['fotos_json'])) {
             $decoded = json_decode((string)$row['fotos_json'], true);
