@@ -266,6 +266,8 @@ const CnpjProdutos = () => {
           nome_produto: parsed.data.nome_produto,
           sku: parsed.data.sku,
           categoria: parsed.data.categoria,
+          codigo_barras: parsed.data.codigo_barras,
+          controlar_estoque: parsed.data.controlar_estoque,
           fotos: parsed.data.fotos,
           preco: parsed.data.preco,
           estoque: parsed.data.estoque,
