@@ -36,6 +36,7 @@ class CnpjProdutosController {
             }
 
             $rows = $this->model->listProdutos($userId, $isAdmin, $limit, $offset, $search, $status, $cnpj);
+            $rows = array_map([$this, 'normalizeProdutoRow'], $rows);
             $total = $this->model->countProdutos($userId, $isAdmin, $search, $status, $cnpj);
 
             Response::success([
@@ -65,9 +66,19 @@ class CnpjProdutosController {
                 return;
             }
 
+            $companyData = $this->getUserCompanyData($userId);
+            if (empty($companyData['cnpj']) || empty($companyData['nome_empresa'])) {
+                Response::error('Preencha CNPJ e nome da empresa em Dados Pessoais para cadastrar produtos', 400);
+                return;
+            }
+
+            $input['cnpj'] = $companyData['cnpj'];
+            $input['nome_empresa'] = $companyData['nome_empresa'];
+
             $payload = $this->validatePayload($input, false);
             $newId = $this->model->createProduto($payload, $userId);
             $created = $this->model->findByIdForUser($newId, $userId, true);
+            $created = $created ? $this->normalizeProdutoRow($created) : null;
 
             Response::success($created, 'Produto cadastrado com sucesso', 201);
         } catch (InvalidArgumentException $e) {
@@ -104,6 +115,12 @@ class CnpjProdutosController {
                 return;
             }
 
+            $companyData = $this->getUserCompanyData($userId);
+            if (!empty($companyData['cnpj']) && !empty($companyData['nome_empresa'])) {
+                $input['cnpj'] = $companyData['cnpj'];
+                $input['nome_empresa'] = $companyData['nome_empresa'];
+            }
+
             $payload = $this->validatePayload($input, true);
             if (empty($payload)) {
                 Response::error('Nenhum campo válido para atualizar', 400);
@@ -112,6 +129,7 @@ class CnpjProdutosController {
 
             $this->model->updateProduto($id, $payload);
             $updated = $this->model->findByIdForUser($id, $userId, $isAdmin);
+            $updated = $updated ? $this->normalizeProdutoRow($updated) : null;
 
             Response::success($updated, 'Produto atualizado com sucesso');
         } catch (InvalidArgumentException $e) {
@@ -152,6 +170,64 @@ class CnpjProdutosController {
             Response::success(['id' => $id], 'Produto excluído com sucesso');
         } catch (Exception $e) {
             Response::error('Erro ao excluir produto: ' . $e->getMessage(), 500);
+        }
+    }
+
+    public function uploadFoto() {
+        try {
+            $userId = (int)(AuthMiddleware::getCurrentUserId() ?? 0);
+            if ($userId <= 0) {
+                Response::error('Usuário não autenticado', 401);
+                return;
+            }
+
+            if (!isset($_FILES['photo']) || !is_array($_FILES['photo'])) {
+                Response::error('Arquivo de foto é obrigatório', 400);
+                return;
+            }
+
+            $file = $_FILES['photo'];
+            if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+                Response::error('Erro ao enviar arquivo', 400);
+                return;
+            }
+
+            $allowedMime = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
+            if (!in_array((string)($file['type'] ?? ''), $allowedMime, true)) {
+                Response::error('Formato inválido. Use JPEG, PNG, GIF ou WebP', 400);
+                return;
+            }
+
+            $maxSize = 5 * 1024 * 1024;
+            if ((int)($file['size'] ?? 0) > $maxSize) {
+                Response::error('Arquivo muito grande. Máximo permitido: 5MB', 400);
+                return;
+            }
+
+            $uploadDir = __DIR__ . '/../../arquivosupload/';
+            if (!is_dir($uploadDir)) {
+                mkdir($uploadDir, 0755, true);
+            }
+
+            $extension = strtolower((string)pathinfo((string)($file['name'] ?? ''), PATHINFO_EXTENSION));
+            if (!in_array($extension, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true)) {
+                $extension = 'jpg';
+            }
+
+            $fileName = 'produto_' . $userId . '_' . date('YmdHis') . '_' . bin2hex(random_bytes(4)) . '.' . $extension;
+            $targetPath = $uploadDir . $fileName;
+
+            if (!move_uploaded_file((string)$file['tmp_name'], $targetPath)) {
+                Response::error('Falha ao salvar arquivo no servidor', 500);
+                return;
+            }
+
+            Response::success([
+                'filename' => $fileName,
+                'url' => $this->buildUploadFileUrl($fileName),
+            ], 'Foto enviada com sucesso');
+        } catch (Exception $e) {
+            Response::error('Erro ao enviar foto: ' . $e->getMessage(), 500);
         }
     }
 
@@ -211,6 +287,23 @@ class CnpjProdutosController {
             $result['categoria'] = $categoria === '' ? null : mb_substr($categoria, 0, 120);
         }
 
+        if (array_key_exists('fotos', $input)) {
+            if (!is_array($input['fotos'])) {
+                throw new InvalidArgumentException('fotos deve ser uma lista');
+            }
+
+            $fotos = array_values(array_filter(array_map(function ($url) {
+                $val = trim((string)$url);
+                return $val !== '' ? mb_substr($val, 0, 500) : null;
+            }, $input['fotos'])));
+
+            if (count($fotos) > 5) {
+                throw new InvalidArgumentException('Máximo de 5 fotos por produto');
+            }
+
+            $result['fotos_json'] = empty($fotos) ? null : json_encode($fotos, JSON_UNESCAPED_UNICODE);
+        }
+
         if (array_key_exists('preco', $input)) {
             $preco = (float)$input['preco'];
             if ($preco < 0) {
@@ -265,5 +358,41 @@ class CnpjProdutosController {
             substr($digits, 5, 3) . '/' .
             substr($digits, 8, 4) . '-' .
             substr($digits, 12, 2);
+    }
+
+    private function normalizeProdutoRow(array $row): array {
+        $fotos = [];
+        if (!empty($row['fotos_json'])) {
+            $decoded = json_decode((string)$row['fotos_json'], true);
+            if (is_array($decoded)) {
+                $fotos = array_values(array_filter($decoded, fn($item) => is_string($item) && trim($item) !== ''));
+            }
+        }
+
+        $row['fotos'] = $fotos;
+        return $row;
+    }
+
+    private function getUserCompanyData(int $userId): array {
+        $stmt = $this->db->prepare('SELECT cnpj, full_name FROM users WHERE id = ? LIMIT 1');
+        $stmt->execute([$userId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        $digits = preg_replace('/\D+/', '', (string)($row['cnpj'] ?? ''));
+        if (strlen($digits) !== 14) {
+            return ['cnpj' => null, 'nome_empresa' => null];
+        }
+
+        $nomeEmpresa = trim((string)($row['full_name'] ?? ''));
+        return [
+            'cnpj' => $this->formatCnpj($digits),
+            'nome_empresa' => $nomeEmpresa !== '' ? mb_substr($nomeEmpresa, 0, 255) : null,
+        ];
+    }
+
+    private function buildUploadFileUrl(string $filename): string {
+        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $host = $_SERVER['HTTP_HOST'] ?? 'api.apipainel.com.br';
+        return $scheme . '://' . $host . '/api/upload/serve?file=' . rawurlencode($filename);
     }
 }

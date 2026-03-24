@@ -115,8 +115,8 @@ class CnpjProdutos extends BaseModel {
 
     public function createProduto(array $data, int $userId): int {
         $query = "INSERT INTO {$this->table}
-            (module_id, user_id, cnpj, nome_empresa, nome_produto, sku, categoria, preco, estoque, status, ativo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)";
+            (module_id, user_id, cnpj, nome_empresa, nome_produto, sku, categoria, fotos_json, preco, estoque, status, ativo)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)";
 
         $stmt = $this->db->prepare($query);
         $stmt->execute([
@@ -127,6 +127,7 @@ class CnpjProdutos extends BaseModel {
             $data['nome_produto'],
             $data['sku'] ?? null,
             $data['categoria'] ?? null,
+            $data['fotos_json'] ?? null,
             (float)$data['preco'],
             (int)$data['estoque'],
             $data['status'],
@@ -139,7 +140,7 @@ class CnpjProdutos extends BaseModel {
         $sets = [];
         $params = [];
 
-        $allowedFields = ['cnpj', 'nome_empresa', 'nome_produto', 'sku', 'categoria', 'preco', 'estoque', 'status'];
+        $allowedFields = ['cnpj', 'nome_empresa', 'nome_produto', 'sku', 'categoria', 'fotos_json', 'preco', 'estoque', 'status'];
 
         foreach ($allowedFields as $field) {
             if (array_key_exists($field, $fields)) {

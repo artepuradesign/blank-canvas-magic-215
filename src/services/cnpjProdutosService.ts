@@ -12,6 +12,7 @@ export interface CnpjProduto {
   nome_produto: string;
   sku: string | null;
   categoria: string | null;
+  fotos?: string[];
   preco: number;
   estoque: number;
   status: ProdutoStatus;
@@ -41,11 +42,13 @@ async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promi
       return { success: false, error: 'Token de autorização não encontrado. Faça login novamente.' };
     }
 
+    const isFormData = options.body instanceof FormData;
+
     const data = await centralApiRequest<any>(endpoint, {
       ...options,
       headers: {
         Authorization: `Bearer ${sessionToken}`,
-        'Content-Type': 'application/json',
+        ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
         ...(options.headers || {}),
       },
     });
@@ -76,6 +79,7 @@ export const cnpjProdutosService = {
     nome_produto: string;
     sku?: string;
     categoria?: string;
+    fotos?: string[];
     preco: number;
     estoque: number;
     status: ProdutoStatus;
@@ -93,6 +97,7 @@ export const cnpjProdutosService = {
     nome_produto?: string;
     sku?: string;
     categoria?: string;
+    fotos?: string[];
     preco?: number;
     estoque?: number;
     status?: ProdutoStatus;
@@ -107,6 +112,16 @@ export const cnpjProdutosService = {
     return apiRequest<{ id: number }>('/cnpj-produtos/excluir', {
       method: 'DELETE',
       body: JSON.stringify({ id }),
+    });
+  },
+
+  async uploadFoto(file: File) {
+    const formData = new FormData();
+    formData.append('photo', file);
+
+    return apiRequest<{ filename: string; url: string }>('/cnpj-produtos/upload-foto', {
+      method: 'POST',
+      body: formData,
     });
   },
 };
